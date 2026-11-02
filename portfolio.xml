@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  <transaction> attributes:
+    date      YYYY-MM-DD (transactions are applied in date order)
+    symbol    AAPL, BRK.B, ... (Yahoo-style ^GSPC, BTC-USD, BRK-B also work)
+    type      buy | sell
+    quantity  number of shares (fractions are fine)
+    price     price per share
+    fee       optional commission, added to cost on buys and subtracted on sells
+
+  <watch symbol="..."/> shows a price without a position, e.g. <watch symbol="^GSPC"/>
+
+  Gains use the average-cost method. Totals assume all holdings are in one currency.
+-->
+<portfolio>
+  <transaction date="2026-04-10" symbol="NVDA" type="buy" quantity="8"    price="188.22" fee="10"/>
+  <transaction date="2026-07-15" symbol="INTC" type="buy" quantity="8"    price="105"    fee="10"/>
+  <transaction date="2026-08-19" symbol="INTC" type="buy" quantity="3.34" price="93"     fee="5"/>
+  <transaction date="2026-10-15" symbol="CRWV" type="buy" quantity="9.85" price="66.5"   fee="10"/>
+</portfolio>

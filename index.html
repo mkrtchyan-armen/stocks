@@ -1,0 +1,833 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f6f6f4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121214" media="(prefers-color-scheme: dark)">
+<title>Live Prices</title>
+<style>
+  :root {
+    --bg: #f6f6f4;
+    --surface: #ffffff;
+    --text: #1b1b1f;
+    --muted: #6b6b75;
+    --border: #e4e4e0;
+    --accent: #3b5bdb;
+    --live-bg: rgba(59, 91, 219, 0.07);
+    --up: #0a7a3d;
+    --down: #c4302b;
+    --up-flash: rgba(10, 122, 61, 0.22);
+    --down-flash: rgba(196, 48, 43, 0.22);
+    --warn-bg: #fff4e5;
+    --warn-text: #7a4a00;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121214;
+      --surface: #1b1b1f;
+      --text: #ececf0;
+      --muted: #9a9aa5;
+      --border: #2d2d34;
+      --accent: #8ea4ff;
+      --live-bg: rgba(142, 164, 255, 0.09);
+      --up: #3ccf7a;
+      --down: #ff6b63;
+      --up-flash: rgba(60, 207, 122, 0.25);
+      --down-flash: rgba(255, 107, 99, 0.25);
+      --warn-bg: #3a2a10;
+      --warn-text: #ffd59a;
+      color-scheme: dark;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 16px 40px; }
+  [hidden] { display: none !important; }
+
+  .top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px 24px;
+    margin-bottom: 16px;
+  }
+  .title { display: flex; align-items: center; gap: 12px; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+  h2 {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin: 24px 0 8px;
+  }
+
+  .pill {
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .pill::before {
+    content: "";
+    display: inline-block;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: 1px;
+    background: var(--muted);
+  }
+  .pill.PRE_MKT::before, .pill.POST_MKT::before { background: #e8a33d; }
+  .pill.REG_MKT::before { background: var(--up); }
+
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .muted { color: var(--muted); }
+
+  button, select, input {
+    font: inherit;
+    color: inherit;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+  }
+  button { cursor: pointer; }
+  button:hover, select:hover { border-color: var(--muted); }
+  button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  .banner {
+    background: var(--warn-bg);
+    color: var(--warn-text);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 16px;
+  }
+  .banner p { margin: 0; }
+  .banner p + p, .banner label { margin-top: 6px; display: block; }
+
+  .summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 10px;
+  }
+  .tile {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .tile .label {
+    font-size: 12px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .tile .value { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .tile .sub { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .table-wrap {
+    position: relative;
+    overflow-x: auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: 0; }
+  th {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    text-align: left;
+    white-space: nowrap;
+  }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  .sym a { color: var(--text); font-weight: 650; text-decoration: none; }
+  .sym a:hover { text-decoration: underline; }
+  .name {
+    color: var(--muted);
+    font-size: 12px;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .meta { font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+  td.live { background: var(--live-bg); }
+  .price { font-size: 15px; font-weight: 600; display: inline-block; padding: 0 4px; margin-right: -4px; border-radius: 4px; }
+  .chg, .when { font-size: 12px; }
+  .when { color: var(--muted); }
+  .pct::before { content: "("; }
+  .pct::after { content: ")"; }
+  .up { color: var(--up); }
+  .down { color: var(--down); }
+  .none { color: var(--muted); }
+
+  .flash-up { animation: flash-up 1.4s ease-out; }
+  .flash-down { animation: flash-down 1.4s ease-out; }
+  @keyframes flash-up { from { background: var(--up-flash); } to { background: transparent; } }
+  @keyframes flash-down { from { background: var(--down-flash); } to { background: transparent; } }
+
+  .foot { font-size: 12px; margin-top: 16px; }
+
+  /* Phones: holdings and watchlist rows become two-column cards. */
+  @media (max-width: 560px) {
+    main { padding-top: 16px; }
+    h1 { font-size: 20px; }
+    .summary { grid-template-columns: 1fr 1fr; }
+    .tile { padding: 10px 12px; }
+    .tile .value { font-size: 18px; }
+    .cards thead { display: none; }
+    .cards tr { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--border); }
+    .cards tbody tr:last-child { border-bottom: 0; }
+    .cards td { display: block; border: 0; padding: 8px 12px; text-align: left; }
+    .cards td.sym { grid-column: 1 / -1; padding-bottom: 2px; }
+    .cards td[data-label]::before {
+      content: attr(data-label);
+      display: block;
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .cards .price { margin: 0 0 0 -4px; }
+    .name { max-width: none; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header class="top">
+    <div class="title">
+      <h1>Live Prices</h1>
+      <span id="market" class="pill" hidden></span>
+    </div>
+    <div class="controls">
+      <label>Refresh
+        <select id="interval">
+          <option value="5">5s</option>
+          <option value="10">10s</option>
+          <option value="15">15s</option>
+          <option value="30">30s</option>
+          <option value="60">1m</option>
+          <option value="0">Off</option>
+        </select>
+      </label>
+      <button id="refresh" type="button">Refresh now</button>
+      <span id="updated" class="muted"></span>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <div id="file-panel" class="banner" hidden>
+    <p id="file-error"></p>
+    <p>Put <strong>portfolio.xml</strong> next to index.html on your web host. Browsers don't let a page
+      opened straight from disk read other files, so in that case choose the file here:</p>
+    <label><input id="file-input" type="file" accept=".xml,text/xml,application/xml"></label>
+  </div>
+
+  <section id="summary" class="summary" hidden></section>
+
+  <section id="holdings-section" hidden>
+    <h2>Holdings</h2>
+    <div class="table-wrap">
+      <table class="cards">
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th class="num">Last</th>
+            <th class="num">Extended hours</th>
+            <th class="num">Today</th>
+            <th class="num">Position</th>
+          </tr>
+        </thead>
+        <tbody id="holdings-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="watch-section" hidden>
+    <h2>Watchlist</h2>
+    <div class="table-wrap">
+      <table class="cards">
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th class="num">Last</th>
+            <th class="num">Extended hours</th>
+          </tr>
+        </thead>
+        <tbody id="watch-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="closed-section" hidden>
+    <h2>Closed positions</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th class="num">Realized gain</th>
+          </tr>
+        </thead>
+        <tbody id="closed-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <p class="foot muted">
+    Holdings come from portfolio.xml; edit that file to change them. Gains use the average-cost method.
+    Extended hours shows the latest pre-market or after-hours trade, measured from the regular close before it.
+    The highlighted cell is trading right now. Refresh pauses while the page is hidden.
+    Prices from CNBC's public quote feed (unofficial).
+  </p>
+</main>
+
+<script>
+'use strict';
+
+const API = 'https://quote.cnbc.com/quote-html-webservice/restQuote/symbolType/symbol';
+const PORTFOLIO_FILE = 'portfolio.xml';
+const BATCH_SIZE = 40;
+// Yahoo-style symbols people are likely to type, mapped to CNBC's.
+const ALIASES = {
+  '^GSPC': '.SPX', '^DJI': '.DJI', '^IXIC': '.IXIC', '^RUT': '.RUT', '^VIX': '.VIX',
+  'BTC-USD': 'BTC.CM=', 'ETH-USD': 'ETH.CM=',
+};
+const SESSION_LABELS = { PRE_MKT: 'Pre-market', REG_MKT: 'Market open', POST_MKT: 'After hours' };
+const EXT_LABELS = { PRE_MKT: 'Pre', POST_MKT: 'After' };
+
+const $ = (id) => document.getElementById(id);
+
+const store = {
+  get(key, fallback) {
+    try {
+      const v = localStorage.getItem('livePrices.' + key);
+      return v == null ? fallback : JSON.parse(v);
+    } catch {
+      return fallback;
+    }
+  },
+  set(key, value) {
+    try { localStorage.setItem('livePrices.' + key, JSON.stringify(value)); } catch {}
+  },
+};
+
+let portfolio = null;        // parsed portfolio.xml
+let quotes = new Map();      // CNBC symbol -> parsed quote
+let loaded = false;          // whether `quotes` has been fetched for the current portfolio
+const shown = new Map();     // "SYM:col" -> last rendered price, to flash changes
+let timer = null;
+let inFlight = false;
+let refreshAgain = false;    // a refresh was requested while one was running
+
+// ---------- portfolio.xml ----------
+
+function toCnbcSymbol(input) {
+  const s = input.trim().toUpperCase();
+  if (ALIASES[s]) return ALIASES[s];
+  const share = /^([A-Z]{1,5})-([A-Z])$/.exec(s); // Yahoo's BRK-B is CNBC's BRK.B
+  return share ? `${share[1]}.${share[2]}` : s;
+}
+
+function attr(el, ...names) {
+  for (const name of names) {
+    const v = el.getAttribute(name);
+    if (v != null && v.trim() !== '') return v.trim();
+  }
+  return null;
+}
+
+function toNumber(s) {
+  if (s == null) return null;
+  const n = parseFloat(String(s).replace(/[,%+]/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+function parsePortfolio(text) {
+  const doc = new DOMParser().parseFromString(text, 'application/xml');
+  const error = doc.querySelector('parsererror');
+  if (error) throw new Error('portfolio.xml is not valid XML: ' + error.textContent.trim().split('\n')[0]);
+
+  const warnings = [];
+  const transactions = [...doc.getElementsByTagName('transaction')].map((el, i) => {
+    const raw = attr(el, 'symbol');
+    const t = {
+      n: i + 1,
+      label: raw ? raw.toUpperCase() : null,
+      symbol: raw ? toCnbcSymbol(raw) : null,
+      type: (attr(el, 'type') || '').toLowerCase(),
+      qty: toNumber(attr(el, 'quantity', 'shares', 'qty')),
+      price: toNumber(attr(el, 'price')),
+      fee: toNumber(attr(el, 'fee', 'commission')) || 0,
+      date: attr(el, 'date') || '',
+    };
+    const problems = [];
+    if (!t.symbol) problems.push('symbol is missing');
+    if (t.type !== 'buy' && t.type !== 'sell') problems.push('type must be "buy" or "sell"');
+    if (!(t.qty > 0)) problems.push('quantity must be a positive number');
+    if (t.price == null || t.price < 0) problems.push('price must be a number');
+    const name = `Transaction ${t.n}${t.label ? ` (${t.label})` : ''}`;
+    if (problems.length) {
+      warnings.push(`${name} skipped: ${problems.join(', ')}.`);
+      return null;
+    }
+    if (t.date && !/^\d{4}-\d{2}-\d{2}$/.test(t.date)) {
+      warnings.push(`${name}: write the date as YYYY-MM-DD so transactions are applied in the right order.`);
+    }
+    return t;
+  }).filter(Boolean);
+
+  // Apply in date order; same-day (or undated) transactions keep their file order.
+  transactions.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.n - b.n));
+
+  const positions = new Map();
+  for (const t of transactions) {
+    let p = positions.get(t.symbol);
+    // cost includes fees (used for gains); priceCost doesn't (the per-share average, as Yahoo shows it).
+    if (!p) positions.set(t.symbol, (p = { symbol: t.symbol, label: t.label, qty: 0, cost: 0, priceCost: 0, realized: 0 }));
+    if (t.type === 'buy') {
+      p.qty += t.qty;
+      p.cost += t.qty * t.price + t.fee;
+      p.priceCost += t.qty * t.price;
+      continue;
+    }
+    if (t.qty > p.qty + 1e-9) {
+      warnings.push(`Transaction ${t.n} (${t.label}) sells ${fmtQty(t.qty)} shares but only ${fmtQty(p.qty)} are held at that point; skipped.`);
+      continue;
+    }
+    const avg = p.cost / p.qty;
+    p.realized += t.qty * (t.price - avg) - t.fee;
+    p.cost -= avg * t.qty;
+    p.priceCost -= (p.priceCost / p.qty) * t.qty;
+    p.qty -= t.qty;
+    if (p.qty < 1e-9) { p.qty = 0; p.cost = 0; p.priceCost = 0; }
+  }
+
+  const all = [...positions.values()];
+  const holdings = all.filter((p) => p.qty > 0);
+  const held = new Set(holdings.map((p) => p.symbol));
+  const watch = [];
+  for (const el of doc.getElementsByTagName('watch')) {
+    const raw = attr(el, 'symbol');
+    if (!raw) continue;
+    const symbol = toCnbcSymbol(raw);
+    if (!held.has(symbol) && !watch.some((w) => w.symbol === symbol)) {
+      watch.push({ symbol, label: raw.toUpperCase() });
+    }
+  }
+  if (!transactions.length && !watch.length) warnings.push('portfolio.xml has no transactions or watch symbols yet.');
+
+  return { holdings, closed: all.filter((p) => p.qty === 0), watch, warnings };
+}
+
+async function loadPortfolio() {
+  try {
+    const res = await fetch(PORTFOLIO_FILE, { cache: 'no-cache' });
+    if (!res.ok) throw new Error(`the server returned HTTP ${res.status}`);
+    usePortfolio(await res.text());
+  } catch (err) {
+    $('file-error').textContent = `Couldn't load portfolio.xml: ${err.message}.`;
+    $('file-panel').hidden = false;
+  }
+}
+
+function usePortfolio(text) {
+  try {
+    portfolio = parsePortfolio(text);
+  } catch (err) {
+    showBanner([err.message]);
+    return;
+  }
+  $('file-panel').hidden = true;
+  showBanner(portfolio.warnings);
+  quotes = new Map();
+  loaded = false;
+  render();
+  refresh();
+}
+
+// ---------- quotes ----------
+
+async function fetchBatch(batch) {
+  const url = `${API}?symbols=${encodeURIComponent(batch.join('|'))}` +
+    '&requestMethod=itv&noform=1&partnerId=2&fund=1&exthrs=1&output=json&events=1';
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`CNBC returned HTTP ${res.status}`);
+  const json = await res.json();
+  const list = json.FormattedQuoteResult && json.FormattedQuoteResult.FormattedQuote;
+  return Array.isArray(list) ? list : list ? [list] : [];
+}
+
+function point(src) {
+  const unchanged = /UNCH/i.test(src.change || '');
+  return {
+    price: src.last,
+    value: toNumber(src.last),
+    change: src.change,
+    pct: src.change_pct,
+    delta: unchanged ? 0 : toNumber(src.change),
+    unchanged,
+    time: src.last_time,
+    timedate: src.last_timedate,
+  };
+}
+
+function parseQuote(x) {
+  if (x.code !== 0 || x.last == null) return null;
+  const ext = x.ExtendedMktQuote;
+  return {
+    symbol: x.symbol,
+    name: x.name || x.shortName || '',
+    type: x.type,
+    status: x.curmktstatus,
+    currency: x.currencyCode,
+    regular: point(x),
+    ext: ext && ext.last ? { ...point(ext), session: ext.type } : null,
+  };
+}
+
+function quoteSymbols() {
+  if (!portfolio) return [];
+  return [...portfolio.holdings, ...portfolio.watch].map((p) => p.symbol);
+}
+
+// ---------- formatting ----------
+
+function fmtNumber(v, digits = 2) {
+  return v.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
+function fmtQty(v) {
+  return v.toLocaleString('en-US', { maximumFractionDigits: 4 });
+}
+
+function fmtMoney(v, currency, signed = false) {
+  const sign = !signed ? (v < 0 ? '−' : '') : v > 0 ? '+' : v < 0 ? '−' : '';
+  let body;
+  try {
+    body = currency
+      ? Math.abs(v).toLocaleString('en-US', { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : fmtNumber(Math.abs(v));
+  } catch {
+    body = fmtNumber(Math.abs(v));
+  }
+  return sign + body;
+}
+
+function fmtPct(v) {
+  if (v == null || !Number.isFinite(v)) return '';
+  return (v > 0 ? '+' : v < 0 ? '−' : '') + fmtNumber(Math.abs(v)) + '%';
+}
+
+function dirClass(v) {
+  return v > 0 ? 'up' : v < 0 ? 'down' : '';
+}
+
+function weekday(isoDate) {
+  return new Date(isoDate + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
+}
+
+// CNBC gives either a bare date (session closed) or a local ISO time with offset.
+function fmtWhen(time, timedate) {
+  if (!time) return timedate || '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(time)) return `${weekday(time)} close`;
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}).*([+-])(\d{2}):?(\d{2})$/.exec(time);
+  if (!m) return timedate || '';
+  const offsetMinutes = (m[4] === '-' ? -1 : 1) * (Number(m[5]) * 60 + Number(m[6]));
+  const today = new Date(Date.now() + offsetMinutes * 60000).toISOString().slice(0, 10);
+  const clock = /\d:\d\d/.test(timedate || '') ? timedate : `${m[2]}:${m[3]}`;
+  return m[1] === today ? clock : `${weekday(m[1])} ${clock}`;
+}
+
+function fmtSigned(s) {
+  return String(s).replace(/^-/, '−');
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
+// ---------- rendering ----------
+
+function priceCell(symbol, col, p, live, label, dataLabel) {
+  const cls = live ? 'num live' : 'num';
+  const data = `data-label="${esc(dataLabel)}"`;
+  if (!p) return `<td class="${cls}" ${data}><span class="none">—</span></td>`;
+
+  const key = `${symbol}:${col}`;
+  const before = shown.get(key);
+  shown.set(key, p.value);
+  const flash = before == null || p.value == null || before === p.value ? ''
+    : p.value > before ? ' flash-up' : ' flash-down';
+  const change = p.change == null ? ''
+    : p.unchanged ? 'Unchanged'
+    : `${esc(fmtSigned(p.change))} <span class="pct">${esc(fmtSigned(p.pct))}</span>`;
+  const when = fmtWhen(p.time, p.timedate);
+
+  return `<td class="${cls}" ${data}>
+    <div class="price${flash}">${esc(p.price)}</div>
+    <div class="chg ${dirClass(p.delta)}">${change}</div>
+    <div class="when">${esc(label ? `${label} · ${when}` : when)}</div>
+  </td>`;
+}
+
+function symbolCell(item, q, extra) {
+  const link = `https://www.cnbc.com/quotes/${encodeURIComponent(item.symbol)}`;
+  const name = q ? q.name : loaded ? 'No quote: symbol not found' : 'Loading…';
+  return `<td class="sym">
+    <a href="${link}" target="_blank" rel="noopener">${esc(item.label)}</a>
+    <div class="name" title="${esc(name)}">${esc(name)}</div>
+    ${extra ? `<div class="meta">${extra}</div>` : ''}
+  </td>`;
+}
+
+// Live-cell flags for one quote, given the US session.
+function liveFlags(q, session) {
+  // Indices and crypto report REG_MKT around the clock, so follow the US session for them.
+  const last = q.status === 'REG_MKT' && (q.type === 'STOCK' || session === 'REG_MKT' || !session);
+  const ext = !!q.ext && q.status === q.ext.session;
+  return { last, ext };
+}
+
+// US session, taken from the first US stock with extended-hours data.
+function usSession() {
+  for (const s of quoteSymbols()) {
+    const q = quotes.get(s);
+    if (q && q.type === 'STOCK' && q.ext) return q.status;
+  }
+  return null;
+}
+
+// Per-position numbers; extended-hours gain only counts outside the regular session.
+function positionStats(p, q) {
+  const stats = { cost: p.cost, value: null, gain: null, gainPct: null, day: null, dayPct: null, ext: null };
+  if (!q || q.regular.value == null) return stats;
+  stats.value = p.qty * q.regular.value;
+  stats.gain = stats.value - p.cost;
+  stats.gainPct = p.cost ? (stats.gain / p.cost) * 100 : null;
+  if (q.regular.delta != null) {
+    stats.day = p.qty * q.regular.delta;
+    const prev = stats.value - stats.day;
+    stats.dayPct = prev ? (stats.day / prev) * 100 : null;
+  }
+  if (q.ext && q.status !== 'REG_MKT' && q.ext.delta != null) stats.ext = p.qty * q.ext.delta;
+  return stats;
+}
+
+function render() {
+  if (!portfolio) return;
+  const session = usSession();
+  const currencies = new Set();
+  const totals = { value: 0, cost: 0, day: 0, ext: 0, hasExt: false, priced: 0, extSession: null };
+
+  const holdingRows = portfolio.holdings.map((p) => {
+    const q = quotes.get(p.symbol);
+    const s = positionStats(p, q);
+    const cur = q && q.currency;
+    if (q) currencies.add(q.currency);
+    if (s.value != null) {
+      totals.value += s.value;
+      totals.cost += p.cost;
+      totals.day += s.day || 0;
+      totals.priced += 1;
+    }
+    if (s.ext != null) {
+      totals.ext += s.ext;
+      totals.hasExt = true;
+      totals.extSession = q.ext.session;
+    }
+    const live = q ? liveFlags(q, session) : { last: false, ext: false };
+    const meta = `${fmtQty(p.qty)} sh · avg ${fmtMoney(p.priceCost / p.qty, cur)}`;
+
+    const today = s.day == null ? '<span class="none">—</span>' : `
+      <div class="price ${dirClass(s.day)}">${fmtMoney(s.day, cur, true)}</div>
+      <div class="chg ${dirClass(s.day)}">${fmtPct(s.dayPct)}</div>
+      ${s.ext != null ? `<div class="when">${EXT_LABELS[q.ext.session] || 'Ext'} <span class="${dirClass(s.ext)}">${fmtMoney(s.ext, cur, true)}</span></div>` : ''}`;
+    const position = s.value == null ? `<div class="when">cost ${fmtMoney(p.cost, cur)}</div>` : `
+      <div class="price">${fmtMoney(s.value, cur)}</div>
+      <div class="chg ${dirClass(s.gain)}">${fmtMoney(s.gain, cur, true)} <span class="pct">${fmtPct(s.gainPct)}</span></div>
+      <div class="when">cost ${fmtMoney(p.cost, cur)}</div>`;
+
+    return `<tr>
+      ${symbolCell(p, q, meta)}
+      ${q ? priceCell(p.symbol, 'last', q.regular, live.last, null, 'Last') : '<td class="num" data-label="Last"><span class="none">—</span></td>'}
+      ${q ? priceCell(p.symbol, 'ext', q.ext, live.ext, q.ext && EXT_LABELS[q.ext.session], 'Extended hours') : '<td class="num" data-label="Extended hours"><span class="none">—</span></td>'}
+      <td class="num" data-label="Today">${today}</td>
+      <td class="num" data-label="Position">${position}</td>
+    </tr>`;
+  });
+  $('holdings-rows').innerHTML = holdingRows.join('');
+  $('holdings-section').hidden = !holdingRows.length;
+
+  const watchRows = portfolio.watch.map((w) => {
+    const q = quotes.get(w.symbol);
+    const live = q ? liveFlags(q, session) : { last: false, ext: false };
+    return `<tr>
+      ${symbolCell(w, q)}
+      ${q ? priceCell(w.symbol, 'last', q.regular, live.last, null, 'Last') : '<td class="num" data-label="Last"><span class="none">—</span></td>'}
+      ${q ? priceCell(w.symbol, 'ext', q.ext, live.ext, q.ext && EXT_LABELS[q.ext.session], 'Extended hours') : '<td class="num" data-label="Extended hours"><span class="none">—</span></td>'}
+    </tr>`;
+  });
+  $('watch-rows').innerHTML = watchRows.join('');
+  $('watch-section').hidden = !watchRows.length;
+
+  const currency = currencies.size === 1 ? [...currencies][0] : null;
+  $('closed-rows').innerHTML = portfolio.closed.map((p) => `<tr>
+      <td class="sym"><strong>${esc(p.label)}</strong></td>
+      <td class="num ${dirClass(p.realized)}">${fmtMoney(p.realized, currency, true)}</td>
+    </tr>`).join('');
+  $('closed-section').hidden = !portfolio.closed.length;
+
+  renderSummary(totals, currency, currencies.size > 1);
+  renderMarket(session);
+}
+
+function tile(label, value, sub, dir) {
+  return `<div class="tile">
+    <div class="label">${esc(label)}</div>
+    <div class="value ${dir || ''}">${value}</div>
+    <div class="sub">${sub || '&nbsp;'}</div>
+  </div>`;
+}
+
+function renderSummary(totals, currency, mixed) {
+  const el = $('summary');
+  const realized = portfolio.holdings.concat(portfolio.closed).reduce((sum, p) => sum + p.realized, 0);
+  if (!portfolio.holdings.length && !portfolio.closed.length) { el.hidden = true; return; }
+
+  const tiles = [];
+  if (portfolio.holdings.length) {
+    if (totals.priced) {
+      const gain = totals.value - totals.cost;
+      const prev = totals.value - totals.day;
+      const missing = portfolio.holdings.length - totals.priced;
+      tiles.push(tile('Market value', fmtMoney(totals.value, currency),
+        `${totals.priced} position${totals.priced === 1 ? '' : 's'}${missing ? ` · ${missing} without a quote` : ''}${mixed ? ' · mixed currencies' : ''}`));
+      tiles.push(tile('Today', fmtMoney(totals.day, currency, true), fmtPct(prev ? (totals.day / prev) * 100 : null), dirClass(totals.day)));
+      if (totals.hasExt) {
+        tiles.push(tile(totals.extSession === 'POST_MKT' ? 'After hours' : 'Pre-market',
+          fmtMoney(totals.ext, currency, true), fmtPct(totals.value ? (totals.ext / totals.value) * 100 : null), dirClass(totals.ext)));
+      }
+      tiles.push(tile('Unrealized gain', fmtMoney(gain, currency, true),
+        `${fmtPct(totals.cost ? (gain / totals.cost) * 100 : null)} · cost ${fmtMoney(totals.cost, currency)}`, dirClass(gain)));
+    } else {
+      tiles.push(tile('Market value', '—', loaded ? 'No quotes' : 'Loading…'));
+    }
+  }
+  tiles.push(tile('Realized gain', fmtMoney(realized, currency, true), 'from sales', dirClass(realized)));
+  el.innerHTML = tiles.join('');
+  el.hidden = false;
+}
+
+function renderMarket(session) {
+  const pill = $('market');
+  if (!session) { pill.hidden = true; return; }
+  const now = new Date().toLocaleTimeString('en-US',
+    { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+  pill.className = `pill ${session}`;
+  pill.textContent = `${SESSION_LABELS[session] || 'Market closed'} · ${now}`;
+  pill.hidden = false;
+}
+
+let quoteError = null;
+function showBanner(messages) {
+  const list = (messages || []).concat(quoteError ? [quoteError] : []);
+  const b = $('banner');
+  b.innerHTML = list.map((m) => `<p>${esc(m)}</p>`).join('');
+  b.hidden = !list.length;
+}
+
+// ---------- refresh loop ----------
+
+async function refresh() {
+  clearTimeout(timer);
+  if (!portfolio) return;
+  if (inFlight) { refreshAgain = true; return; }
+  inFlight = true;
+  try {
+    const requested = quoteSymbols();
+    const batches = [];
+    for (let i = 0; i < requested.length; i += BATCH_SIZE) {
+      batches.push(requested.slice(i, i + BATCH_SIZE));
+    }
+    const results = (await Promise.all(batches.map(fetchBatch))).flat();
+    const next = new Map();
+    for (const r of results) {
+      const q = parseQuote(r);
+      if (q) next.set(q.symbol, q);
+    }
+    quotes = next;
+    loaded = true;
+    quoteError = null;
+    render();
+    $('updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+  } catch (err) {
+    quoteError = `Couldn't load prices: ${err.message}. Retrying on the next refresh.`;
+  } finally {
+    showBanner(portfolio.warnings);
+    inFlight = false;
+    if (refreshAgain) {
+      refreshAgain = false;
+      refresh();
+    } else {
+      schedule();
+    }
+  }
+}
+
+function schedule() {
+  clearTimeout(timer);
+  const seconds = Number($('interval').value);
+  if (seconds > 0 && !document.hidden) timer = setTimeout(refresh, seconds * 1000);
+}
+
+// ---------- events ----------
+
+$('interval').value = String(store.get('interval', 15));
+$('interval').addEventListener('change', () => {
+  store.set('interval', Number($('interval').value));
+  schedule();
+});
+
+$('refresh').addEventListener('click', refresh);
+
+$('file-input').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (file) usePortfolio(await file.text());
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) clearTimeout(timer);
+  else refresh();
+});
+
+loadPortfolio();
+</script>
+</body>
+</html>
