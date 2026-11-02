@@ -625,8 +625,9 @@ function usSession() {
 }
 
 // Per-position numbers; extended-hours gain only counts outside the regular session.
+// extGain is the unrealized gain at the extended-hours price.
 function positionStats(p, q) {
-  const stats = { cost: p.cost, value: null, gain: null, gainPct: null, day: null, dayPct: null, ext: null };
+  const stats = { cost: p.cost, value: null, gain: null, gainPct: null, day: null, dayPct: null, ext: null, extGain: null, extGainPct: null };
   if (!q || q.regular.value == null) return stats;
   stats.value = p.qty * q.regular.value;
   stats.gain = stats.value - p.cost;
@@ -636,7 +637,11 @@ function positionStats(p, q) {
     const prev = stats.value - stats.day;
     stats.dayPct = prev ? (stats.day / prev) * 100 : null;
   }
-  if (q.ext && q.status !== 'REG_MKT' && q.ext.delta != null) stats.ext = p.qty * q.ext.delta;
+  if (q.ext && q.status !== 'REG_MKT' && q.ext.delta != null) {
+    stats.ext = p.qty * q.ext.delta;
+    stats.extGain = stats.gain + stats.ext;
+    stats.extGainPct = p.cost ? (stats.extGain / p.cost) * 100 : null;
+  }
   return stats;
 }
 
@@ -672,6 +677,7 @@ function render() {
     const position = s.value == null ? `<div class="when">cost ${fmtMoney(p.cost, cur)}</div>` : `
       <div class="price">${fmtMoney(s.value, cur)}</div>
       <div class="chg ${dirClass(s.gain)}">${fmtMoney(s.gain, cur, true)} <span class="pct">${fmtPct(s.gainPct)}</span></div>
+      ${s.extGain != null ? `<div class="when">${EXT_LABELS[q.ext.session] || 'Ext'} <span class="${dirClass(s.extGain)}">${fmtMoney(s.extGain, cur, true)} ${fmtPct(s.extGainPct)}</span></div>` : ''}
       <div class="when">cost ${fmtMoney(p.cost, cur)}</div>`;
 
     return `<tr>
@@ -718,29 +724,31 @@ function tile(label, value, sub, dir) {
 
 function renderSummary(totals, currency, mixed) {
   const el = $('summary');
-  const realized = portfolio.holdings.concat(portfolio.closed).reduce((sum, p) => sum + p.realized, 0);
-  if (!portfolio.holdings.length && !portfolio.closed.length) { el.hidden = true; return; }
+  if (!portfolio.holdings.length) { el.hidden = true; return; }
 
   const tiles = [];
-  if (portfolio.holdings.length) {
-    if (totals.priced) {
-      const gain = totals.value - totals.cost;
-      const prev = totals.value - totals.day;
-      const missing = portfolio.holdings.length - totals.priced;
-      tiles.push(tile('Market value', fmtMoney(totals.value, currency),
-        `${totals.priced} position${totals.priced === 1 ? '' : 's'}${missing ? ` · ${missing} without a quote` : ''}${mixed ? ' · mixed currencies' : ''}`));
-      tiles.push(tile('Today', fmtMoney(totals.day, currency, true), fmtPct(prev ? (totals.day / prev) * 100 : null), dirClass(totals.day)));
-      if (totals.hasExt) {
-        tiles.push(tile(totals.extSession === 'POST_MKT' ? 'After hours' : 'Pre-market',
-          fmtMoney(totals.ext, currency, true), fmtPct(totals.value ? (totals.ext / totals.value) * 100 : null), dirClass(totals.ext)));
-      }
-      tiles.push(tile('Unrealized gain', fmtMoney(gain, currency, true),
-        `${fmtPct(totals.cost ? (gain / totals.cost) * 100 : null)} · cost ${fmtMoney(totals.cost, currency)}`, dirClass(gain)));
-    } else {
-      tiles.push(tile('Market value', '—', loaded ? 'No quotes' : 'Loading…'));
+  if (totals.priced) {
+    const gain = totals.value - totals.cost;
+    const prev = totals.value - totals.day;
+    const missing = portfolio.holdings.length - totals.priced;
+    const extName = totals.extSession === 'POST_MKT' ? 'After hours' : 'Pre-market';
+    tiles.push(tile('Market value', fmtMoney(totals.value, currency),
+      `${totals.priced} position${totals.priced === 1 ? '' : 's'}${missing ? ` · ${missing} without a quote` : ''}${mixed ? ' · mixed currencies' : ''}`));
+    tiles.push(tile('Today', fmtMoney(totals.day, currency, true), fmtPct(prev ? (totals.day / prev) * 100 : null), dirClass(totals.day)));
+    if (totals.hasExt) {
+      tiles.push(tile(extName, fmtMoney(totals.ext, currency, true), fmtPct(totals.value ? (totals.ext / totals.value) * 100 : null), dirClass(totals.ext)));
     }
+    tiles.push(tile('Unrealized gain', fmtMoney(gain, currency, true),
+      `${fmtPct(totals.cost ? (gain / totals.cost) * 100 : null)} · cost ${fmtMoney(totals.cost, currency)}`, dirClass(gain)));
+    if (totals.hasExt) {
+      // Positions without an extended-hours trade count at their regular price.
+      const extGain = gain + totals.ext;
+      tiles.push(tile(`Unrealized · ${EXT_LABELS[totals.extSession] || 'Ext'}`, fmtMoney(extGain, currency, true),
+        `${fmtPct(totals.cost ? (extGain / totals.cost) * 100 : null)} · value ${fmtMoney(totals.value + totals.ext, currency)}`, dirClass(extGain)));
+    }
+  } else {
+    tiles.push(tile('Market value', '—', loaded ? 'No quotes' : 'Loading…'));
   }
-  tiles.push(tile('Realized gain', fmtMoney(realized, currency, true), 'from sales', dirClass(realized)));
   el.innerHTML = tiles.join('');
   el.hidden = false;
 }
