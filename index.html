@@ -121,9 +121,11 @@
   .banner p { margin: 0; }
   .banner p + p, .banner label { margin-top: 6px; display: block; }
 
-  .summary {
+  .summary { display: grid; gap: 10px; }
+  /* auto-fill keeps the same columns in both rows, so the tiles line up. */
+  .summary-row {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 10px;
   }
   .tile {
@@ -140,6 +142,8 @@
   }
   .tile .value { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 2px; }
   .tile .sub { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .clock-section { margin-bottom: 16px; }
+  .clock-section h2 { margin-top: 0; }
 
   .table-wrap {
     position: relative;
@@ -195,9 +199,13 @@
   @media (max-width: 560px) {
     main { padding-top: 16px; }
     h1 { font-size: 20px; }
-    .summary { grid-template-columns: 1fr 1fr; }
+    .summary-row { grid-template-columns: 1fr 1fr; }
     .tile { padding: 10px 12px; }
     .tile .value { font-size: 18px; }
+    .clock { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+    .clock .tile { padding: 8px 10px; }
+    .clock .tile .label { font-size: 11px; letter-spacing: 0; }
+    .clock .tile .value { font-size: 16px; }
     .cards thead { display: none; }
     .cards tr { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--border); }
     .cards tbody tr:last-child { border-bottom: 0; }
@@ -247,6 +255,11 @@
       opened straight from disk read other files, so in that case choose the file here:</p>
     <label><input id="file-input" type="file" accept=".xml,text/xml,application/xml"></label>
   </div>
+
+  <section class="clock-section">
+    <h2>Nasdaq countdown · Yerevan time</h2>
+    <div id="clock" class="summary-row clock"></div>
+  </section>
 
   <section id="summary" class="summary" hidden></section>
 
@@ -625,9 +638,8 @@ function usSession() {
 }
 
 // Per-position numbers; extended-hours gain only counts outside the regular session.
-// extGain is the unrealized gain at the extended-hours price.
 function positionStats(p, q) {
-  const stats = { cost: p.cost, value: null, gain: null, gainPct: null, day: null, dayPct: null, ext: null, extGain: null, extGainPct: null };
+  const stats = { cost: p.cost, value: null, gain: null, gainPct: null, day: null, dayPct: null, ext: null };
   if (!q || q.regular.value == null) return stats;
   stats.value = p.qty * q.regular.value;
   stats.gain = stats.value - p.cost;
@@ -637,11 +649,7 @@ function positionStats(p, q) {
     const prev = stats.value - stats.day;
     stats.dayPct = prev ? (stats.day / prev) * 100 : null;
   }
-  if (q.ext && q.status !== 'REG_MKT' && q.ext.delta != null) {
-    stats.ext = p.qty * q.ext.delta;
-    stats.extGain = stats.gain + stats.ext;
-    stats.extGainPct = p.cost ? (stats.extGain / p.cost) * 100 : null;
-  }
+  if (q.ext && q.status !== 'REG_MKT' && q.ext.delta != null) stats.ext = p.qty * q.ext.delta;
   return stats;
 }
 
@@ -677,7 +685,6 @@ function render() {
     const position = s.value == null ? `<div class="when">cost ${fmtMoney(p.cost, cur)}</div>` : `
       <div class="price">${fmtMoney(s.value, cur)}</div>
       <div class="chg ${dirClass(s.gain)}">${fmtMoney(s.gain, cur, true)} <span class="pct">${fmtPct(s.gainPct)}</span></div>
-      ${s.extGain != null ? `<div class="when">${EXT_LABELS[q.ext.session] || 'Ext'} <span class="${dirClass(s.extGain)}">${fmtMoney(s.extGain, cur, true)} ${fmtPct(s.extGainPct)}</span></div>` : ''}
       <div class="when">cost ${fmtMoney(p.cost, cur)}</div>`;
 
     return `<tr>
@@ -710,7 +717,7 @@ function render() {
     </tr>`).join('');
   $('closed-section').hidden = !portfolio.closed.length;
 
-  renderSummary(totals, currency, currencies.size > 1);
+  renderSummary(totals, currency, currencies.size > 1, session);
   renderMarket(session);
 }
 
@@ -722,35 +729,45 @@ function tile(label, value, sub, dir) {
   </div>`;
 }
 
-function renderSummary(totals, currency, mixed) {
+// Two rows: market values, then changes and gains. The pre-market / after-hours tiles
+// only appear outside the regular session.
+function renderSummary(totals, currency, mixed, session) {
   const el = $('summary');
   if (!portfolio.holdings.length) { el.hidden = true; return; }
-
-  const tiles = [];
-  if (totals.priced) {
-    const gain = totals.value - totals.cost;
-    const prev = totals.value - totals.day;
-    const missing = portfolio.holdings.length - totals.priced;
-    const extName = totals.extSession === 'POST_MKT' ? 'After hours' : 'Pre-market';
-    tiles.push(tile('Market value', fmtMoney(totals.value, currency),
-      `${totals.priced} position${totals.priced === 1 ? '' : 's'}${missing ? ` · ${missing} without a quote` : ''}${mixed ? ' · mixed currencies' : ''}`));
-    tiles.push(tile('Today', fmtMoney(totals.day, currency, true), fmtPct(prev ? (totals.day / prev) * 100 : null), dirClass(totals.day)));
-    if (totals.hasExt) {
-      tiles.push(tile(extName, fmtMoney(totals.ext, currency, true), fmtPct(totals.value ? (totals.ext / totals.value) * 100 : null), dirClass(totals.ext)));
-    }
-    tiles.push(tile('Unrealized gain', fmtMoney(gain, currency, true),
-      `${fmtPct(totals.cost ? (gain / totals.cost) * 100 : null)} · cost ${fmtMoney(totals.cost, currency)}`, dirClass(gain)));
-    if (totals.hasExt) {
-      // Positions without an extended-hours trade count at their regular price.
-      const extGain = gain + totals.ext;
-      tiles.push(tile(`Unrealized · ${EXT_LABELS[totals.extSession] || 'Ext'}`, fmtMoney(extGain, currency, true),
-        `${fmtPct(totals.cost ? (extGain / totals.cost) * 100 : null)} · value ${fmtMoney(totals.value + totals.ext, currency)}`, dirClass(extGain)));
-    }
-  } else {
-    tiles.push(tile('Market value', '—', loaded ? 'No quotes' : 'Loading…'));
-  }
-  el.innerHTML = tiles.join('');
   el.hidden = false;
+  const row = (tiles) => `<div class="summary-row">${tiles.join('')}</div>`;
+  if (!totals.priced) {
+    el.innerHTML = row([tile('Market value', '—', loaded ? 'No quotes' : 'Loading…')]);
+    return;
+  }
+
+  const pctOf = (v, base) => fmtPct(base ? (v / base) * 100 : null);
+  const missing = portfolio.holdings.length - totals.priced;
+  const notes = [missing ? `${missing} without a quote` : '', mixed ? 'mixed currencies' : ''].filter(Boolean).join(' · ');
+  const gain = totals.value - totals.cost;
+  const prev = totals.value - totals.day;
+  const dayLabel = session && session !== 'REG_MKT' ? 'Last session' : 'Today';
+
+  const values = [
+    tile('Initial value', fmtMoney(totals.cost, currency)),
+    tile('Market value', fmtMoney(totals.value, currency), notes),
+  ];
+  const changes = [tile(dayLabel, fmtMoney(totals.day, currency, true), pctOf(totals.day, prev), dirClass(totals.day))];
+  const gainTile = tile('Unrealized gain', fmtMoney(gain, currency, true), pctOf(gain, totals.cost), dirClass(gain));
+  if (totals.hasExt) {
+    // Positions without an extended-hours trade count at their regular price.
+    const ext = EXT_LABELS[totals.extSession] || 'Ext';
+    const extGain = gain + totals.ext;
+    values.push(tile(`Value · ${ext}`, fmtMoney(totals.value + totals.ext, currency)));
+    changes.push(
+      tile(`Change · ${ext}`, fmtMoney(totals.ext, currency, true), pctOf(totals.ext, totals.value), dirClass(totals.ext)),
+      gainTile,
+      tile(`Unrealized · ${ext}`, fmtMoney(extGain, currency, true), pctOf(extGain, totals.cost), dirClass(extGain)),
+    );
+  } else {
+    changes.push(gainTile);
+  }
+  el.innerHTML = row(values) + row(changes);
 }
 
 function renderMarket(session) {
@@ -769,6 +786,82 @@ function showBanner(messages) {
   const b = $('banner');
   b.innerHTML = list.map((m) => `<p>${esc(m)}</p>`).join('');
   b.hidden = !list.length;
+}
+
+// ---------- Nasdaq countdown ----------
+
+// From NYSE's 2026–2028 holiday calendar, which Nasdaq follows. Add later years when they're announced.
+const MARKET_HOLIDAYS = new Set([
+  '2026-01-01', '2026-01-19', '2026-02-16', '2026-04-03', '2026-05-25', '2026-06-19', '2026-07-03', '2026-09-07', '2026-11-26', '2026-12-25',
+  '2027-01-01', '2027-01-18', '2027-02-15', '2027-03-26', '2027-05-31', '2027-06-18', '2027-07-05', '2027-09-06', '2027-11-25', '2027-12-24',
+  '2028-01-17', '2028-02-21', '2028-04-14', '2028-05-29', '2028-06-19', '2028-07-04', '2028-09-04', '2028-11-23', '2028-12-25',
+]);
+// The regular session ends at 13:00 on these days, and after hours at 17:00.
+const EARLY_CLOSES = new Set(['2026-11-27', '2026-12-24', '2027-11-26', '2028-07-03', '2028-11-24']);
+// [hour, minute] in New York.
+const CLOCK_EVENTS = [
+  { label: 'Pre-market opens', at: () => [4, 0] },
+  { label: 'Market opens', at: () => [9, 30] },
+  { label: 'After hours close', at: (day) => (EARLY_CLOSES.has(day) ? [17, 0] : [20, 0]) },
+];
+const CLOCK_ZONE = 'Asia/Yerevan';
+const DAY_MS = 86400000;
+
+const nyParts = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+});
+const localDay = new Intl.DateTimeFormat('en-CA', { timeZone: CLOCK_ZONE });
+const localTime = new Intl.DateTimeFormat('en-GB', { timeZone: CLOCK_ZONE, hour: '2-digit', minute: '2-digit' });
+const localWeekday = new Intl.DateTimeFormat('en-US', { timeZone: CLOCK_ZONE, weekday: 'short' });
+
+// New York's wall-clock time at `ms`, written as if it were UTC.
+function nyWall(ms) {
+  const p = Object.fromEntries(nyParts.formatToParts(ms).map((x) => [x.type, x.value]));
+  return Date.UTC(+p.year, p.month - 1, +p.day, +p.hour, +p.minute);
+}
+
+// The moment it's hour:minute in New York on `day` (YYYY-MM-DD). Trading days are weekdays,
+// well clear of the Sunday 02:00 DST switch, so one offset correction is exact.
+function nyMoment(day, [hour, minute]) {
+  const wall = Date.UTC(+day.slice(0, 4), day.slice(5, 7) - 1, +day.slice(8, 10), hour, minute);
+  return wall - (nyWall(wall) - wall);
+}
+
+// Next time the event happens on a trading day, skipping weekends and holidays.
+function nextMoment(event, now) {
+  const start = nyWall(now);
+  for (let i = 0; i < 10; i++) {
+    const date = new Date(start + i * DAY_MS);
+    const day = date.toISOString().slice(0, 10);
+    if (date.getUTCDay() % 6 === 0 || MARKET_HOLIDAYS.has(day)) continue;
+    const at = nyMoment(day, event.at(day));
+    if (at > now) return at;
+  }
+  return null;
+}
+
+function fmtCountdown(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const days = Math.floor(s / 86400);
+  const two = (n) => String(n).padStart(2, '0');
+  const hms = `${Math.floor(s / 3600) % 24}:${two(Math.floor(s / 60) % 60)}:${two(s % 60)}`;
+  return days ? `${days}d ${hms}` : hms;
+}
+
+function localWhen(ms, now) {
+  const day = localDay.format(ms);
+  const prefix = day === localDay.format(now) ? 'Today'
+    : day === localDay.format(now + DAY_MS) ? 'Tomorrow'
+    : localWeekday.format(ms);
+  return `${prefix} ${localTime.format(ms)}`;
+}
+
+function renderClock() {
+  const now = Date.now();
+  $('clock').innerHTML = CLOCK_EVENTS.map((e) => {
+    const at = nextMoment(e, now);
+    return at == null ? tile(e.label, '—') : tile(e.label, fmtCountdown(at - now), localWhen(at, now));
+  }).join('');
 }
 
 // ---------- refresh loop ----------
@@ -835,6 +928,8 @@ document.addEventListener('visibilitychange', () => {
   else refresh();
 });
 
+renderClock();
+setInterval(renderClock, 1000);
 loadPortfolio();
 </script>
 </body>
