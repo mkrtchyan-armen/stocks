@@ -14,7 +14,6 @@
     --muted: #6b6b75;
     --border: #e4e4e0;
     --accent: #3b5bdb;
-    --live-bg: rgba(59, 91, 219, 0.07);
     --up: #0a7a3d;
     --down: #c4302b;
     --up-flash: rgba(10, 122, 61, 0.22);
@@ -31,7 +30,6 @@
       --muted: #9a9aa5;
       --border: #2d2d34;
       --accent: #8ea4ff;
-      --live-bg: rgba(142, 164, 255, 0.09);
       --up: #3ccf7a;
       --down: #ff6b63;
       --up-flash: rgba(60, 207, 122, 0.25);
@@ -166,24 +164,36 @@
   }
   .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
-  .sym a { color: var(--text); font-weight: 650; text-decoration: none; }
-  .sym a:hover { text-decoration: underline; }
+  /* One card per holding or watched symbol: a heading, then a row per price (close, after hours, ...). */
+  .card-list { display: grid; gap: 10px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px 4px;
+  }
+  .card-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 12px; }
+  .card-head a { font-size: 16px; font-weight: 650; color: var(--text); text-decoration: none; }
+  .card-head a:hover { text-decoration: underline; }
   .name {
     color: var(--muted);
     font-size: 12px;
-    max-width: 220px;
+    max-width: 260px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .meta { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .detail { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .rows { margin-top: 6px; }
+  .rows th, .rows td { padding: 8px 0 8px 12px; vertical-align: top; }
+  .rows th:first-child, .rows td:first-child { padding-left: 0; }
+  .rows th { font-size: 11px; white-space: normal; text-align: right; }
+  .row-label { color: var(--muted); white-space: nowrap; width: 1%; }
+  .rows .chg { white-space: normal; }
+  .nw { white-space: nowrap; }
 
-  td.live { background: var(--live-bg); }
   .price { font-size: 15px; font-weight: 600; display: inline-block; padding: 0 4px; margin-right: -4px; border-radius: 4px; }
-  .chg, .when { font-size: 12px; }
-  .when { color: var(--muted); }
-  .pct::before { content: "("; }
-  .pct::after { content: ")"; }
+  .chg { font-size: 12px; }
   .up { color: var(--up); }
   .down { color: var(--down); }
   .none { color: var(--muted); }
@@ -195,7 +205,6 @@
 
   .foot { font-size: 12px; margin-top: 16px; }
 
-  /* Phones: holdings and watchlist rows become two-column cards. */
   @media (max-width: 560px) {
     main { padding-top: 16px; }
     h1 { font-size: 20px; }
@@ -206,21 +215,10 @@
     .clock .tile { padding: 8px 10px; }
     .clock .tile .label { font-size: 11px; letter-spacing: 0; }
     .clock .tile .value { font-size: 16px; }
-    .cards thead { display: none; }
-    .cards tr { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--border); }
-    .cards tbody tr:last-child { border-bottom: 0; }
-    .cards td { display: block; border: 0; padding: 8px 12px; text-align: left; }
-    .cards td.sym { grid-column: 1 / -1; padding-bottom: 2px; }
-    .cards td[data-label]::before {
-      content: attr(data-label);
-      display: block;
-      font-size: 11px;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-    .cards .price { margin: 0 0 0 -4px; }
-    .name { max-width: none; }
+    .card { padding: 10px 12px 2px; }
+    .rows th, .rows td { padding-left: 8px; }
+    .rows .price { font-size: 14px; }
+    .name { max-width: 180px; }
   }
 </style>
 </head>
@@ -265,36 +263,12 @@
 
   <section id="holdings-section" hidden>
     <h2>Holdings</h2>
-    <div class="table-wrap">
-      <table class="cards">
-        <thead>
-          <tr>
-            <th>Symbol</th>
-            <th class="num">Last</th>
-            <th class="num">Extended hours</th>
-            <th class="num">Today</th>
-            <th class="num">Position</th>
-          </tr>
-        </thead>
-        <tbody id="holdings-rows"></tbody>
-      </table>
-    </div>
+    <div id="holdings" class="card-list"></div>
   </section>
 
   <section id="watch-section" hidden>
     <h2>Watchlist</h2>
-    <div class="table-wrap">
-      <table class="cards">
-        <thead>
-          <tr>
-            <th>Symbol</th>
-            <th class="num">Last</th>
-            <th class="num">Extended hours</th>
-          </tr>
-        </thead>
-        <tbody id="watch-rows"></tbody>
-      </table>
-    </div>
+    <div id="watch" class="card-list"></div>
   </section>
 
   <section id="closed-section" hidden>
@@ -314,8 +288,8 @@
 
   <p class="foot muted">
     Holdings come from portfolio.xml; edit that file to change them. Gains use the average-cost method.
-    Extended hours shows the latest pre-market or after-hours trade, measured from the regular close before it.
-    The highlighted cell is trading right now. Refresh pauses while the page is hidden.
+    Outside regular hours each card shows the last close and the latest pre-market or after-hours price,
+    whose change is measured from that close. Refresh pauses while the page is hidden.
     Prices from CNBC's public quote feed (unofficial).
   </p>
 </main>
@@ -561,24 +535,13 @@ function dirClass(v) {
   return v > 0 ? 'up' : v < 0 ? 'down' : '';
 }
 
-function weekday(isoDate) {
-  return new Date(isoDate + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
-}
-
-// CNBC gives either a bare date (session closed) or a local ISO time with offset.
-function fmtWhen(time, timedate) {
-  if (!time) return timedate || '';
-  if (/^\d{4}-\d{2}-\d{2}$/.test(time)) return `${weekday(time)} close`;
-  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}).*([+-])(\d{2}):?(\d{2})$/.exec(time);
-  if (!m) return timedate || '';
-  const offsetMinutes = (m[4] === '-' ? -1 : 1) * (Number(m[5]) * 60 + Number(m[6]));
-  const today = new Date(Date.now() + offsetMinutes * 60000).toISOString().slice(0, 10);
-  const clock = /\d:\d\d/.test(timedate || '') ? timedate : `${m[2]}:${m[3]}`;
-  return m[1] === today ? clock : `${weekday(m[1])} ${clock}`;
-}
-
-function fmtSigned(s) {
-  return String(s).replace(/^-/, '−');
+// "↓$3.13 (5.82%)"; on a narrow screen the percentage wraps onto its own line.
+function fmtChange(p, currency) {
+  if (p.delta == null) return '';
+  if (p.delta === 0) return 'Unchanged';
+  const base = p.value - p.delta;
+  const pct = base ? ` <span class="nw">(${fmtNumber(Math.abs((p.delta / base) * 100))}%)</span>` : '';
+  return `<span class="nw">${p.delta > 0 ? '↑' : '↓'}${fmtMoney(Math.abs(p.delta), currency)}</span>${pct}`;
 }
 
 function esc(s) {
@@ -588,44 +551,68 @@ function esc(s) {
 
 // ---------- rendering ----------
 
-function priceCell(symbol, col, p, live, label, dataLabel) {
-  const cls = live ? 'num live' : 'num';
-  const data = `data-label="${esc(dataLabel)}"`;
-  if (!p) return `<td class="${cls}" ${data}><span class="none">—</span></td>`;
-
-  const key = `${symbol}:${col}`;
+// One labelled price row. With a position (`pos`) it also shows the position's value and
+// unrealized gain at that price.
+function priceRow(label, p, key, pos, currency) {
+  const none = '<span class="none">—</span>';
+  const cols = pos ? 3 : 1;
+  if (!p || p.value == null) {
+    return `<tr><td class="row-label">${esc(label)}</td>${`<td class="num">${none}</td>`.repeat(cols)}</tr>`;
+  }
   const before = shown.get(key);
   shown.set(key, p.value);
-  const flash = before == null || p.value == null || before === p.value ? ''
-    : p.value > before ? ' flash-up' : ' flash-down';
-  const change = p.change == null ? ''
-    : p.unchanged ? 'Unchanged'
-    : `${esc(fmtSigned(p.change))} <span class="pct">${esc(fmtSigned(p.pct))}</span>`;
-  const when = fmtWhen(p.time, p.timedate);
-
-  return `<td class="${cls}" ${data}>
-    <div class="price${flash}">${esc(p.price)}</div>
-    <div class="chg ${dirClass(p.delta)}">${change}</div>
-    <div class="when">${esc(label ? `${label} · ${when}` : when)}</div>
-  </td>`;
+  const flash = before == null || before === p.value ? '' : p.value > before ? ' flash-up' : ' flash-down';
+  let position = '';
+  if (pos) {
+    const value = pos.qty * p.value;
+    const gain = value - pos.cost;
+    position = `
+      <td class="num"><div class="price">${fmtMoney(value, currency)}</div></td>
+      <td class="num">
+        <div class="price ${dirClass(gain)}">${fmtMoney(gain, currency, true)}</div>
+        <div class="chg ${dirClass(gain)}">${fmtPct(pos.cost ? (gain / pos.cost) * 100 : null)}</div>
+      </td>`;
+  }
+  return `<tr>
+    <td class="row-label">${esc(label)}</td>
+    <td class="num">
+      <div class="price${flash}">${fmtMoney(p.value, currency)}</div>
+      <div class="chg ${dirClass(p.delta)}">${fmtChange(p, currency)}</div>
+    </td>${position}
+  </tr>`;
 }
 
-function symbolCell(item, q, extra) {
+// During regular hours: one "Now" row. Otherwise the last close plus the latest
+// pre-market / after-hours price, if there is one.
+function quoteCard(item, q, session, pos) {
+  const currency = q && q.currency;
   const link = `https://www.cnbc.com/quotes/${encodeURIComponent(item.symbol)}`;
   const name = q ? q.name : loaded ? 'No quote: symbol not found' : 'Loading…';
-  return `<td class="sym">
-    <a href="${link}" target="_blank" rel="noopener">${esc(item.label)}</a>
-    <div class="name" title="${esc(name)}">${esc(name)}</div>
-    ${extra ? `<div class="meta">${extra}</div>` : ''}
-  </td>`;
+  const detail = pos ? `${fmtQty(pos.qty)} sh · avg ${fmtMoney(pos.priceCost / pos.qty, currency)}` : '';
+  let rows = '';
+  if (q) {
+    rows = isOpen(q, session)
+      ? priceRow('Now', q.regular, `${item.symbol}:last`, pos, currency)
+      : priceRow('Close', q.regular, `${item.symbol}:last`, pos, currency)
+        + (q.ext ? priceRow(SESSION_LABELS[q.ext.session] || 'Extended', q.ext, `${item.symbol}:ext`, pos, currency) : '');
+  }
+  const head = `<tr><th></th><th class="num">Price</th>${pos ? '<th class="num">Value</th><th class="num">Unrealized P/L</th>' : ''}</tr>`;
+  return `<article class="card">
+    <div class="card-head">
+      <div>
+        <a href="${link}" target="_blank" rel="noopener">${esc(item.label)}</a>
+        <div class="name" title="${esc(name)}">${esc(name)}</div>
+      </div>
+      ${detail ? `<div class="detail">${detail}</div>` : ''}
+    </div>
+    ${rows ? `<table class="rows"><thead>${head}</thead><tbody>${rows}</tbody></table>` : ''}
+  </article>`;
 }
 
-// Live-cell flags for one quote, given the US session.
-function liveFlags(q, session) {
+// Whether the quote's regular session is trading now.
+function isOpen(q, session) {
   // Indices and crypto report REG_MKT around the clock, so follow the US session for them.
-  const last = q.status === 'REG_MKT' && (q.type === 'STOCK' || session === 'REG_MKT' || !session);
-  const ext = !!q.ext && q.status === q.ext.session;
-  return { last, ext };
+  return q.status === 'REG_MKT' && (q.type === 'STOCK' || session === 'REG_MKT' || !session);
 }
 
 // US session, taken from the first US stock with extended-hours data.
@@ -659,10 +646,9 @@ function render() {
   const currencies = new Set();
   const totals = { value: 0, cost: 0, day: 0, ext: 0, hasExt: false, priced: 0, extSession: null };
 
-  const holdingRows = portfolio.holdings.map((p) => {
+  const holdingCards = portfolio.holdings.map((p) => {
     const q = quotes.get(p.symbol);
     const s = positionStats(p, q);
-    const cur = q && q.currency;
     if (q) currencies.add(q.currency);
     if (s.value != null) {
       totals.value += s.value;
@@ -675,40 +661,13 @@ function render() {
       totals.hasExt = true;
       totals.extSession = q.ext.session;
     }
-    const live = q ? liveFlags(q, session) : { last: false, ext: false };
-    const meta = `${fmtQty(p.qty)} sh · avg ${fmtMoney(p.priceCost / p.qty, cur)}`;
-
-    const today = s.day == null ? '<span class="none">—</span>' : `
-      <div class="price ${dirClass(s.day)}">${fmtMoney(s.day, cur, true)}</div>
-      <div class="chg ${dirClass(s.day)}">${fmtPct(s.dayPct)}</div>
-      ${s.ext != null ? `<div class="when">${EXT_LABELS[q.ext.session] || 'Ext'} <span class="${dirClass(s.ext)}">${fmtMoney(s.ext, cur, true)}</span></div>` : ''}`;
-    const position = s.value == null ? `<div class="when">cost ${fmtMoney(p.cost, cur)}</div>` : `
-      <div class="price">${fmtMoney(s.value, cur)}</div>
-      <div class="chg ${dirClass(s.gain)}">${fmtMoney(s.gain, cur, true)} <span class="pct">${fmtPct(s.gainPct)}</span></div>
-      <div class="when">cost ${fmtMoney(p.cost, cur)}</div>`;
-
-    return `<tr>
-      ${symbolCell(p, q, meta)}
-      ${q ? priceCell(p.symbol, 'last', q.regular, live.last, null, 'Last') : '<td class="num" data-label="Last"><span class="none">—</span></td>'}
-      ${q ? priceCell(p.symbol, 'ext', q.ext, live.ext, q.ext && EXT_LABELS[q.ext.session], 'Extended hours') : '<td class="num" data-label="Extended hours"><span class="none">—</span></td>'}
-      <td class="num" data-label="Today">${today}</td>
-      <td class="num" data-label="Position">${position}</td>
-    </tr>`;
+    return quoteCard(p, q, session, p);
   });
-  $('holdings-rows').innerHTML = holdingRows.join('');
-  $('holdings-section').hidden = !holdingRows.length;
+  $('holdings').innerHTML = holdingCards.join('');
+  $('holdings-section').hidden = !holdingCards.length;
 
-  const watchRows = portfolio.watch.map((w) => {
-    const q = quotes.get(w.symbol);
-    const live = q ? liveFlags(q, session) : { last: false, ext: false };
-    return `<tr>
-      ${symbolCell(w, q)}
-      ${q ? priceCell(w.symbol, 'last', q.regular, live.last, null, 'Last') : '<td class="num" data-label="Last"><span class="none">—</span></td>'}
-      ${q ? priceCell(w.symbol, 'ext', q.ext, live.ext, q.ext && EXT_LABELS[q.ext.session], 'Extended hours') : '<td class="num" data-label="Extended hours"><span class="none">—</span></td>'}
-    </tr>`;
-  });
-  $('watch-rows').innerHTML = watchRows.join('');
-  $('watch-section').hidden = !watchRows.length;
+  $('watch').innerHTML = portfolio.watch.map((w) => quoteCard(w, quotes.get(w.symbol), session)).join('');
+  $('watch-section').hidden = !portfolio.watch.length;
 
   const currency = currencies.size === 1 ? [...currencies][0] : null;
   $('closed-rows').innerHTML = portfolio.closed.map((p) => `<tr>
