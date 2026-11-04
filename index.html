@@ -757,11 +757,11 @@ const MARKET_HOLIDAYS = new Set([
 ]);
 // The regular session ends at 13:00 on these days, and after hours at 17:00.
 const EARLY_CLOSES = new Set(['2026-11-27', '2026-12-24', '2027-11-26', '2028-07-03', '2028-11-24']);
-// [hour, minute] in New York.
+// [hour, minute] in New York. `show` gets the session in progress: 'pre', 'regular', 'after' or null.
 const CLOCK_EVENTS = [
-  { label: 'Pre-market opens', at: () => [4, 0] },
-  { label: 'Market opens', at: () => [9, 30] },
-  { label: 'After hours close', at: (day) => (EARLY_CLOSES.has(day) ? [17, 0] : [20, 0]) },
+  { label: 'Pre-market opens', at: () => [4, 0], show: (session) => session !== 'pre' },
+  { label: 'Market opens', at: () => [9, 30], show: () => true },
+  { label: 'After hours close', at: (day) => (EARLY_CLOSES.has(day) ? [17, 0] : [20, 0]), show: (session) => session === 'after' },
 ];
 const CLOCK_ZONE = 'Asia/Yerevan';
 const DAY_MS = 86400000;
@@ -791,12 +791,32 @@ function nextMoment(event, now) {
   const start = nyWall(now);
   for (let i = 0; i < 10; i++) {
     const date = new Date(start + i * DAY_MS);
+    if (!isTradingDay(date)) continue;
     const day = date.toISOString().slice(0, 10);
-    if (date.getUTCDay() % 6 === 0 || MARKET_HOLIDAYS.has(day)) continue;
     const at = nyMoment(day, event.at(day));
     if (at > now) return at;
   }
   return null;
+}
+
+// `date` holds a New York date as UTC, like nyWall returns.
+function isTradingDay(date) {
+  return date.getUTCDay() % 6 !== 0 && !MARKET_HOLIDAYS.has(date.toISOString().slice(0, 10));
+}
+
+// The session in progress in New York by the calendar: 'pre', 'regular', 'after' or null.
+function nySession(now) {
+  const date = new Date(nyWall(now));
+  if (!isTradingDay(date)) return null;
+  const day = date.toISOString().slice(0, 10);
+  const early = EARLY_CLOSES.has(day);
+  const starts = [['pre', [4, 0]], ['regular', [9, 30]], ['after', early ? [13, 0] : [16, 0]], [null, early ? [17, 0] : [20, 0]]];
+  let session = null;
+  for (const [name, at] of starts) {
+    if (now < nyMoment(day, at)) break;
+    session = name;
+  }
+  return session;
 }
 
 function fmtCountdown(ms) {
@@ -815,9 +835,9 @@ function localWhen(ms, now) {
   return `${prefix} ${localTime.format(ms)}`;
 }
 
-function renderClock() {
-  const now = Date.now();
-  $('clock').innerHTML = CLOCK_EVENTS.map((e) => {
+function renderClock(now = Date.now()) {
+  const session = nySession(now);
+  $('clock').innerHTML = CLOCK_EVENTS.filter((e) => e.show(session)).map((e) => {
     const at = nextMoment(e, now);
     return at == null ? tile(e.label, '—') : tile(e.label, fmtCountdown(at - now), localWhen(at, now));
   }).join('');
@@ -888,7 +908,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 renderClock();
-setInterval(renderClock, 1000);
+setInterval(() => renderClock(), 1000);
 loadPortfolio();
 </script>
 </body>
