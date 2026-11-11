@@ -566,8 +566,13 @@ function priceRow(label, p, key, pos, currency) {
   if (pos) {
     const value = pos.qty * p.value;
     const gain = value - pos.cost;
+    // The position's change over the same move as the price change beside it.
+    const move = { value, delta: p.delta == null ? null : pos.qty * p.delta };
     position = `
-      <td class="num"><div class="price">${fmtMoney(value, currency)}</div></td>
+      <td class="num">
+        <div class="price">${fmtMoney(value, currency)}</div>
+        <div class="chg ${dirClass(move.delta)}">${fmtChange(move, currency)}</div>
+      </td>
       <td class="num">
         <div class="price ${dirClass(gain)}">${fmtMoney(gain, currency, true)}</div>
         <div class="chg ${dirClass(gain)}">${fmtPct(pos.cost ? (gain / pos.cost) * 100 : null)}</div>
