@@ -237,6 +237,11 @@
   .help-body th:first-child, .help-body td:first-child { padding-left: 0; }
   .help-body th { font-size: 11px; }
   .help-body tfoot td { font-weight: 650; border-top: 1px solid var(--border); border-bottom: 0; }
+  /* Unrealized gain popup: a bold line per holding, then its price gain and fees beneath. */
+  .help-body tr.group td { padding-top: 10px; padding-bottom: 2px; border-bottom: 0; }
+  .help-body tr.sub td { padding-top: 0; padding-bottom: 2px; border-bottom: 0; color: var(--muted); font-size: 12px; }
+  .help-body tr.sub td:first-child { padding-left: 12px; }
+  .help-body tr.sub.end td { padding-bottom: 10px; border-bottom: 1px solid var(--border); }
 
   @media (max-width: 560px) {
     main { padding-top: 16px; }
@@ -375,7 +380,7 @@ let timer = null;
 let inFlight = false;
 let refreshAgain = false;    // a refresh was requested while one was running
 let breakdown = null;        // what the summary was last drawn from, for the "?" popups
-let helpKind = 'day';        // which change the popup explains: 'day' or 'ext'
+let helpKind = 'day';        // which tile the popup explains: 'day', 'ext', 'gain' or 'extGain'
 
 // ---------- portfolio.xml ----------
 
@@ -695,8 +700,9 @@ function render() {
   if (!portfolio) return;
   const session = usSession();
   const currencies = new Set();
-  // parts: each priced holding's price changes, for the "?" breakdown popups.
-  const totals = { value: 0, cost: 0, day: 0, ext: 0, hasExt: false, priced: 0, extSession: null, parts: [] };
+  // extValue: value at pre-market / after-hours prices, the close for holdings without such a trade.
+  // parts: each priced holding's numbers, for the "?" breakdown popups.
+  const totals = { value: 0, extValue: 0, cost: 0, day: 0, ext: 0, hasExt: false, priced: 0, extSession: null, parts: [] };
 
   const holdingCards = portfolio.holdings.map((p) => {
     const q = quotes.get(p.symbol);
@@ -707,7 +713,12 @@ function render() {
       totals.cost += p.cost;
       totals.day += s.day || 0;
       totals.priced += 1;
-      totals.parts.push({ label: p.label, qty: p.qty, day: q.regular.delta, ext: s.ext != null ? q.ext.delta : null });
+      const extPrice = s.ext != null && q.ext.value != null ? q.ext.value : null;
+      totals.extValue += p.qty * (extPrice != null ? extPrice : q.regular.value);
+      totals.parts.push({
+        label: p.label, qty: p.qty, avg: p.priceCost / p.qty, fees: p.cost - p.priceCost,
+        price: q.regular.value, extPrice, day: q.regular.delta, ext: s.ext != null ? q.ext.delta : null,
+      });
     }
     if (s.ext != null) {
       totals.ext += s.ext;
@@ -733,7 +744,7 @@ function render() {
   renderMarket(session);
 }
 
-// `help` adds a "?" button that opens that breakdown popup ('day' or 'ext').
+// `help` adds a "?" button that opens that breakdown popup (see renderHelp).
 function tile(label, value, sub, dir, help) {
   const button = help
     ? ` <button type="button" class="help" data-help="${help}" aria-label="How is this calculated?">?</button>` : '';
@@ -768,16 +779,16 @@ function renderSummary(totals, currency, mixed, session) {
     tile('Market value', fmtMoney(totals.value, currency), notes),
   ];
   const changes = [tile(dayLabel, fmtMoney(totals.day, currency, true), pctOf(totals.day, prev), dirClass(totals.day), 'day')];
-  const gainTile = tile('Unrealized gain', fmtMoney(gain, currency, true), pctOf(gain, totals.cost), dirClass(gain));
+  const gainTile = tile('Unrealized gain', fmtMoney(gain, currency, true), pctOf(gain, totals.cost), dirClass(gain), 'gain');
   if (totals.hasExt) {
     // Positions without an extended-hours trade count at their regular price.
     const ext = EXT_LABELS[totals.extSession] || 'Ext';
-    const extGain = gain + totals.ext;
-    values.push(tile(`Value · ${ext}`, fmtMoney(totals.value + totals.ext, currency)));
+    const extGain = totals.extValue - totals.cost;
+    values.push(tile(`Value · ${ext}`, fmtMoney(totals.extValue, currency)));
     changes.push(
       tile(`Change · ${ext}`, fmtMoney(totals.ext, currency, true), pctOf(totals.ext, totals.value), dirClass(totals.ext), 'ext'),
       gainTile,
-      tile(`Unrealized · ${ext}`, fmtMoney(extGain, currency, true), pctOf(extGain, totals.cost), dirClass(extGain)),
+      tile(`Unrealized · ${ext}`, fmtMoney(extGain, currency, true), pctOf(extGain, totals.cost), dirClass(extGain), 'extGain'),
     );
   } else {
     changes.push(gainTile);
@@ -790,14 +801,20 @@ function renderSummary(totals, currency, mixed, session) {
 
 // ---------- "?" breakdown popup ----------
 
-// Lists each holding's shares × price change (the number under Value on its card) and
-// how they add up to the tile's total and percentage.
+// helpKind: 'day' / 'ext' explain the change tiles, 'gain' / 'extGain' the unrealized gain tiles.
 function renderHelp() {
   if (!breakdown) return;
-  const { totals, currency, dayLabel } = breakdown;
-  const ext = helpKind === 'ext';
-  if (ext && !totals.hasExt) { $('help').close(); return; }
+  const ext = helpKind === 'ext' || helpKind === 'extGain';
+  if (ext && !breakdown.totals.hasExt) { $('help').close(); return; }
+  const { title, body } = helpKind === 'gain' || helpKind === 'extGain' ? gainHelp(ext) : changeHelp(ext);
+  $('help-title').textContent = title;
+  $('help-content').innerHTML = body;
+}
 
+// Each holding's shares × price change (the number under Value on its card), adding up to
+// the tile's total and percentage.
+function changeHelp(ext) {
+  const { totals, currency, dayLabel } = breakdown;
   const session = SESSION_LABELS[totals.extSession] || 'Extended hours';
   const row = ext ? `${session} row` : `${dayLabel === 'Today' ? 'Now' : 'Close'} row`;
   const total = ext ? totals.ext : totals.day;
@@ -815,19 +832,58 @@ function renderHelp() {
     </tr>`;
   }).join('');
 
-  $('help-title').textContent = ext ? `${session} change` : dayLabel === 'Today' ? "Today's change" : 'Last session change';
-  $('help-content').innerHTML = `
-    <p>${ext
-      ? `Each holding's shares × its ${session.toLowerCase()} price change since the close`
-      : `Each holding's shares × its price change in the ${dayLabel === 'Today' ? "current" : 'last'} regular session`}.
-      It's the number under Value on the card's ${row}.</p>
-    <table>
-      <thead><tr><th>Stock</th><th class="num">Shares × change</th><th class="num">Value change</th></tr></thead>
-      <tbody>${rows}</tbody>
-      <tfoot><tr><td>Total</td><td></td><td class="num ${dirClass(total)}">${fmtMoney(total, currency, true)}</td></tr></tfoot>
-    </table>
-    <p>${base ? `${fmtPct((total / base) * 100)} is the total divided by ${fmtMoney(base, currency)}, your holdings' value
-      ${ext ? 'at the close' : 'before this session'}.` : ''}</p>`;
+  return {
+    title: ext ? `${session} change` : dayLabel === 'Today' ? "Today's change" : 'Last session change',
+    body: `
+      <p>${ext
+        ? `Each holding's shares × its ${session.toLowerCase()} price change since the close`
+        : `Each holding's shares × its price change in the ${dayLabel === 'Today' ? 'current' : 'last'} regular session`}.
+        It's the number under Value on the card's ${row}.</p>
+      <table>
+        <thead><tr><th>Stock</th><th class="num">Shares × change</th><th class="num">Value change</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><td>Total</td><td></td><td class="num ${dirClass(total)}">${fmtMoney(total, currency, true)}</td></tr></tfoot>
+      </table>
+      <p>${base ? `${fmtPct((total / base) * 100)} is the total divided by ${fmtMoney(base, currency)}, your holdings' value
+        ${ext ? 'at the close' : 'before this session'}.` : ''}
+        Fees don't change with the price, so they aren't part of this; they're in Unrealized gain.</p>`,
+  };
+}
+
+// Each holding's shares × (price − average price) minus its fees, which is the Unrealized P/L on
+// its card, adding up to the tile's total.
+function gainHelp(ext) {
+  const { totals, currency, dayLabel } = breakdown;
+  const session = SESSION_LABELS[totals.extSession] || 'Extended hours';
+  const money = (v, signed) => fmtMoney(v, currency, signed);
+  let fees = 0;
+  const rows = totals.parts.map((part) => {
+    const atExt = ext && part.extPrice != null;
+    const price = atExt ? part.extPrice : part.price;
+    const priceGain = part.qty * (price - part.avg);
+    const gain = priceGain - part.fees;
+    fees += part.fees;
+    const note = ext && !atExt ? ` <span class="nw">(close: no ${session.toLowerCase()} trade)</span>` : '';
+    return `
+      <tr class="group"><td><strong>${esc(part.label)}</strong></td><td class="num ${dirClass(gain)}"><strong>${money(gain, true)}</strong></td></tr>
+      <tr class="sub"><td>${fmtQty(part.qty)} × (${money(price)} − ${money(part.avg)})${note}</td><td class="num">${money(priceGain, true)}</td></tr>
+      <tr class="sub end"><td>Fees</td><td class="num">${money(-part.fees, true)}</td></tr>`;
+  }).join('');
+  const total = (ext ? totals.extValue : totals.value) - totals.cost;
+  const pct = totals.cost ? `${fmtPct((total / totals.cost) * 100)} is the total divided by ${money(totals.cost)},
+    the Initial value (what you paid, fees included).` : '';
+
+  return {
+    title: ext ? `Unrealized gain at ${session.toLowerCase()} prices` : 'Unrealized gain',
+    body: `
+      <p>Each holding's shares × (${ext ? `${session.toLowerCase()} price` : 'price'} − average price), minus its fees.
+        The bold number is the Unrealized P/L on the card's ${ext ? session : dayLabel === 'Today' ? 'Now' : 'Close'} row.</p>
+      <table>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><td>Total</td><td class="num ${dirClass(total)}">${money(total, true)}</td></tr></tfoot>
+      </table>
+      <p>That's ${money(total + fees, true)} from prices and ${money(-fees, true)} in fees. ${pct}</p>`,
+  };
 }
 
 function renderMarket(session) {
