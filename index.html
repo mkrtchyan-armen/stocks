@@ -205,6 +205,39 @@
 
   .foot { font-size: 12px; margin-top: 16px; }
 
+  .help {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    margin-left: 4px;
+    border-radius: 50%;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 18px;
+    color: var(--muted);
+    text-transform: none;
+    letter-spacing: 0;
+    vertical-align: 1px;
+  }
+  .help-dialog {
+    width: min(440px, calc(100vw - 32px));
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+    color: var(--text);
+  }
+  .help-dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
+  .help-body { padding: 14px 16px 6px; }
+  .help-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .help-head h3 { margin: 0; font-size: 16px; }
+  #help-close { padding: 2px 8px; }
+  .help-body p { margin: 8px 0 12px; color: var(--muted); font-size: 13px; }
+  .help-body th, .help-body td { padding: 6px 0 6px 12px; }
+  .help-body th:first-child, .help-body td:first-child { padding-left: 0; }
+  .help-body th { font-size: 11px; }
+  .help-body tfoot td { font-weight: 650; border-top: 1px solid var(--border); border-bottom: 0; }
+
   @media (max-width: 560px) {
     main { padding-top: 16px; }
     h1 { font-size: 20px; }
@@ -294,6 +327,16 @@
   </p>
 </main>
 
+<dialog id="help" class="help-dialog" aria-labelledby="help-title">
+  <div class="help-body">
+    <div class="help-head">
+      <h3 id="help-title"></h3>
+      <button type="button" id="help-close" aria-label="Close">✕</button>
+    </div>
+    <div id="help-content"></div>
+  </div>
+</dialog>
+
 <script>
 'use strict';
 
@@ -331,6 +374,8 @@ const shown = new Map();     // "SYM:col" -> last rendered price, to flash chang
 let timer = null;
 let inFlight = false;
 let refreshAgain = false;    // a refresh was requested while one was running
+let breakdown = null;        // what the summary was last drawn from, for the "?" popups
+let helpKind = 'day';        // which change the popup explains: 'day' or 'ext'
 
 // ---------- portfolio.xml ----------
 
@@ -536,11 +581,11 @@ function dirClass(v) {
 }
 
 // "↓$3.13 (5.82%)"; on a narrow screen the percentage wraps onto its own line.
-function fmtChange(p, currency) {
+function fmtChange(p, currency, withPct = true) {
   if (p.delta == null) return '';
   if (p.delta === 0) return 'Unchanged';
   const base = p.value - p.delta;
-  const pct = base ? ` <span class="nw">(${fmtNumber(Math.abs((p.delta / base) * 100))}%)</span>` : '';
+  const pct = withPct && base ? ` <span class="nw">(${fmtNumber(Math.abs((p.delta / base) * 100))}%)</span>` : '';
   return `<span class="nw">${p.delta > 0 ? '↑' : '↓'}${fmtMoney(Math.abs(p.delta), currency)}</span>${pct}`;
 }
 
@@ -566,12 +611,13 @@ function priceRow(label, p, key, pos, currency) {
   if (pos) {
     const value = pos.qty * p.value;
     const gain = value - pos.cost;
-    // The position's change over the same move as the price change beside it.
+    // The position's change over the same move as the price change beside it; the percentage
+    // would repeat the price column's, so it's left out.
     const move = { value, delta: p.delta == null ? null : pos.qty * p.delta };
     position = `
       <td class="num">
         <div class="price">${fmtMoney(value, currency)}</div>
-        <div class="chg ${dirClass(move.delta)}">${fmtChange(move, currency)}</div>
+        <div class="chg ${dirClass(move.delta)}">${fmtChange(move, currency, false)}</div>
       </td>
       <td class="num">
         <div class="price ${dirClass(gain)}">${fmtMoney(gain, currency, true)}</div>
@@ -649,7 +695,8 @@ function render() {
   if (!portfolio) return;
   const session = usSession();
   const currencies = new Set();
-  const totals = { value: 0, cost: 0, day: 0, ext: 0, hasExt: false, priced: 0, extSession: null };
+  // parts: each priced holding's price changes, for the "?" breakdown popups.
+  const totals = { value: 0, cost: 0, day: 0, ext: 0, hasExt: false, priced: 0, extSession: null, parts: [] };
 
   const holdingCards = portfolio.holdings.map((p) => {
     const q = quotes.get(p.symbol);
@@ -660,6 +707,7 @@ function render() {
       totals.cost += p.cost;
       totals.day += s.day || 0;
       totals.priced += 1;
+      totals.parts.push({ label: p.label, qty: p.qty, day: q.regular.delta, ext: s.ext != null ? q.ext.delta : null });
     }
     if (s.ext != null) {
       totals.ext += s.ext;
@@ -685,9 +733,12 @@ function render() {
   renderMarket(session);
 }
 
-function tile(label, value, sub, dir) {
+// `help` adds a "?" button that opens that breakdown popup ('day' or 'ext').
+function tile(label, value, sub, dir, help) {
+  const button = help
+    ? ` <button type="button" class="help" data-help="${help}" aria-label="How is this calculated?">?</button>` : '';
   return `<div class="tile">
-    <div class="label">${esc(label)}</div>
+    <div class="label">${esc(label)}${button}</div>
     <div class="value ${dir || ''}">${value}</div>
     <div class="sub">${sub || '&nbsp;'}</div>
   </div>`;
@@ -716,7 +767,7 @@ function renderSummary(totals, currency, mixed, session) {
     tile('Initial value', fmtMoney(totals.cost, currency)),
     tile('Market value', fmtMoney(totals.value, currency), notes),
   ];
-  const changes = [tile(dayLabel, fmtMoney(totals.day, currency, true), pctOf(totals.day, prev), dirClass(totals.day))];
+  const changes = [tile(dayLabel, fmtMoney(totals.day, currency, true), pctOf(totals.day, prev), dirClass(totals.day), 'day')];
   const gainTile = tile('Unrealized gain', fmtMoney(gain, currency, true), pctOf(gain, totals.cost), dirClass(gain));
   if (totals.hasExt) {
     // Positions without an extended-hours trade count at their regular price.
@@ -724,7 +775,7 @@ function renderSummary(totals, currency, mixed, session) {
     const extGain = gain + totals.ext;
     values.push(tile(`Value · ${ext}`, fmtMoney(totals.value + totals.ext, currency)));
     changes.push(
-      tile(`Change · ${ext}`, fmtMoney(totals.ext, currency, true), pctOf(totals.ext, totals.value), dirClass(totals.ext)),
+      tile(`Change · ${ext}`, fmtMoney(totals.ext, currency, true), pctOf(totals.ext, totals.value), dirClass(totals.ext), 'ext'),
       gainTile,
       tile(`Unrealized · ${ext}`, fmtMoney(extGain, currency, true), pctOf(extGain, totals.cost), dirClass(extGain)),
     );
@@ -732,6 +783,51 @@ function renderSummary(totals, currency, mixed, session) {
     changes.push(gainTile);
   }
   el.innerHTML = row(values) + row(changes);
+
+  breakdown = { totals, currency, dayLabel };
+  if ($('help').open) renderHelp();
+}
+
+// ---------- "?" breakdown popup ----------
+
+// Lists each holding's shares × price change (the number under Value on its card) and
+// how they add up to the tile's total and percentage.
+function renderHelp() {
+  if (!breakdown) return;
+  const { totals, currency, dayLabel } = breakdown;
+  const ext = helpKind === 'ext';
+  if (ext && !totals.hasExt) { $('help').close(); return; }
+
+  const session = SESSION_LABELS[totals.extSession] || 'Extended hours';
+  const row = ext ? `${session} row` : `${dayLabel === 'Today' ? 'Now' : 'Close'} row`;
+  const total = ext ? totals.ext : totals.day;
+  const base = ext ? totals.value : totals.value - totals.day;
+  const rows = totals.parts.map((part) => {
+    const delta = ext ? part.ext : part.day;
+    if (delta == null) {
+      return `<tr><td>${esc(part.label)}</td><td class="num none" colspan="2">no ${ext ? `${session.toLowerCase()} trade` : 'change'}, counts as $0</td></tr>`;
+    }
+    const change = part.qty * delta;
+    return `<tr>
+      <td><strong>${esc(part.label)}</strong></td>
+      <td class="num">${fmtQty(part.qty)} × <span class="${dirClass(delta)}">${fmtChange({ delta }, currency, false)}</span></td>
+      <td class="num ${dirClass(change)}">${fmtChange({ delta: change }, currency, false)}</td>
+    </tr>`;
+  }).join('');
+
+  $('help-title').textContent = ext ? `${session} change` : dayLabel === 'Today' ? "Today's change" : 'Last session change';
+  $('help-content').innerHTML = `
+    <p>${ext
+      ? `Each holding's shares × its ${session.toLowerCase()} price change since the close`
+      : `Each holding's shares × its price change in the ${dayLabel === 'Today' ? "current" : 'last'} regular session`}.
+      It's the number under Value on the card's ${row}.</p>
+    <table>
+      <thead><tr><th>Stock</th><th class="num">Shares × change</th><th class="num">Value change</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><td>Total</td><td></td><td class="num ${dirClass(total)}">${fmtMoney(total, currency, true)}</td></tr></tfoot>
+    </table>
+    <p>${base ? `${fmtPct((total / base) * 100)} is the total divided by ${fmtMoney(base, currency)}, your holdings' value
+      ${ext ? 'at the close' : 'before this session'}.` : ''}</p>`;
 }
 
 function renderMarket(session) {
@@ -901,6 +997,19 @@ $('interval').addEventListener('change', () => {
 });
 
 $('refresh').addEventListener('click', refresh);
+
+$('summary').addEventListener('click', (e) => {
+  const button = e.target.closest('.help');
+  if (!button) return;
+  helpKind = button.dataset.help;
+  renderHelp();
+  $('help').showModal();
+});
+$('help-close').addEventListener('click', () => $('help').close());
+// A click on the dimmed backdrop lands on the dialog element itself.
+$('help').addEventListener('click', (e) => {
+  if (e.target === $('help')) $('help').close();
+});
 
 $('file-input').addEventListener('change', async (e) => {
   const file = e.target.files && e.target.files[0];
