@@ -544,7 +544,8 @@ function parseQuote(x) {
     status: x.curmktstatus,
     currency: x.currencyCode,
     regular: point(x),
-    ext: ext && ext.last ? { ...point(ext), session: ext.type } : null,
+    // Overnight CNBC labels the last after-hours trade POST_MKT_PREV.
+    ext: ext && ext.last ? { ...point(ext), session: String(ext.type).replace(/_PREV$/, '') } : null,
   };
 }
 
@@ -640,14 +641,14 @@ function priceRow(label, p, key, pos, currency) {
 
 // During regular hours: one "Now" row. Otherwise the last close plus the latest
 // pre-market / after-hours price, if there is one.
-function quoteCard(item, q, session, pos) {
+function quoteCard(item, q, pos) {
   const currency = q && q.currency;
   const link = `https://www.cnbc.com/quotes/${encodeURIComponent(item.symbol)}`;
   const name = q ? q.name : loaded ? 'No quote: symbol not found' : 'Loading…';
   const detail = pos ? `${fmtQty(pos.qty)} sh · avg ${fmtMoney(pos.priceCost / pos.qty, currency)}` : '';
   let rows = '';
   if (q) {
-    rows = isOpen(q, session)
+    rows = isOpen(q)
       ? priceRow('Now', q.regular, `${item.symbol}:last`, pos, currency)
       : priceRow('Close', q.regular, `${item.symbol}:last`, pos, currency)
         + (q.ext ? priceRow(SESSION_LABELS[q.ext.session] || 'Extended', q.ext, `${item.symbol}:ext`, pos, currency) : '');
@@ -665,19 +666,16 @@ function quoteCard(item, q, session, pos) {
   </article>`;
 }
 
-// Whether the quote's regular session is trading now.
-function isOpen(q, session) {
-  // Indices and crypto report REG_MKT around the clock, so follow the US session for them.
-  return q.status === 'REG_MKT' && (q.type === 'STOCK' || session === 'REG_MKT' || !session);
+// Whether the quote's regular session is trading now. CNBC keeps saying REG_MKT overnight and
+// for closed indices, but then its last trade time is a bare date; while trading it has a clock
+// time. That also works for crypto and foreign listings, which trade outside US hours.
+function isOpen(q) {
+  return q.status === 'REG_MKT' && /T\d/.test(q.regular.time || '');
 }
 
-// US session, taken from the first US stock with extended-hours data.
+// US session by the Nasdaq calendar: PRE_MKT, REG_MKT, POST_MKT, or null when closed.
 function usSession() {
-  for (const s of quoteSymbols()) {
-    const q = quotes.get(s);
-    if (q && q.type === 'STOCK' && q.ext) return q.status;
-  }
-  return null;
+  return { pre: 'PRE_MKT', regular: 'REG_MKT', after: 'POST_MKT' }[nySession(Date.now())] || null;
 }
 
 // Per-position numbers; extended-hours gain only counts outside the regular session.
@@ -692,7 +690,7 @@ function positionStats(p, q) {
     const prev = stats.value - stats.day;
     stats.dayPct = prev ? (stats.day / prev) * 100 : null;
   }
-  if (q.ext && q.status !== 'REG_MKT' && q.ext.delta != null) stats.ext = p.qty * q.ext.delta;
+  if (q.ext && !isOpen(q) && q.ext.delta != null) stats.ext = p.qty * q.ext.delta;
   return stats;
 }
 
@@ -725,12 +723,12 @@ function render() {
       totals.hasExt = true;
       totals.extSession = q.ext.session;
     }
-    return quoteCard(p, q, session, p);
+    return quoteCard(p, q, p);
   });
   $('holdings').innerHTML = holdingCards.join('');
   $('holdings-section').hidden = !holdingCards.length;
 
-  $('watch').innerHTML = portfolio.watch.map((w) => quoteCard(w, quotes.get(w.symbol), session)).join('');
+  $('watch').innerHTML = portfolio.watch.map((w) => quoteCard(w, quotes.get(w.symbol))).join('');
   $('watch-section').hidden = !portfolio.watch.length;
 
   const currency = currencies.size === 1 ? [...currencies][0] : null;
@@ -772,7 +770,7 @@ function renderSummary(totals, currency, mixed, session) {
   const notes = [missing ? `${missing} without a quote` : '', mixed ? 'mixed currencies' : ''].filter(Boolean).join(' · ');
   const gain = totals.value - totals.cost;
   const prev = totals.value - totals.day;
-  const dayLabel = session && session !== 'REG_MKT' ? 'Last session' : 'Today';
+  const dayLabel = session === 'REG_MKT' ? 'Today' : 'Last session';
 
   const values = [
     tile('Initial value', fmtMoney(totals.cost, currency)),
@@ -888,10 +886,9 @@ function gainHelp(ext) {
 
 function renderMarket(session) {
   const pill = $('market');
-  if (!session) { pill.hidden = true; return; }
   const now = new Date().toLocaleTimeString('en-US',
     { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
-  pill.className = `pill ${session}`;
+  pill.className = `pill ${session || 'closed'}`;
   pill.textContent = `${SESSION_LABELS[session] || 'Market closed'} · ${now}`;
   pill.hidden = false;
 }
